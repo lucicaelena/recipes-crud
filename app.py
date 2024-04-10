@@ -1,6 +1,7 @@
 # Import flask
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from models import db, Recipe, IngredientQuantity
+from flask_migrate import Migrate
 
 # Initialize a Flask object
 app = Flask(__name__)
@@ -10,6 +11,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///recipes.db"
 
 # We initialize the database connection
 db.init_app(app)
+migrate = Migrate(app, db)
 
 
 def convert_recipe_to_dict(recipe):
@@ -27,8 +29,11 @@ def convert_recipe_to_dict(recipe):
 
 @app.route("/recipes")
 def get_recipes():
+    page = request.args.get("page", default=1, type=int)
+    per_page = request.args.get("per_page", default=20, type=int)
+    offset = (page - 1) * per_page
     return_recipies = []
-    recipes = Recipe.query.all()
+    recipes = Recipe.query.offset(offset).limit(per_page).all()
     for recipe in recipes:
         recipe_dict = convert_recipe_to_dict(recipe)
         return_recipies.append(recipe_dict)
@@ -46,7 +51,13 @@ def get_recipe(id):
 def create_recipe():
     # HTTP Body data (as JSON)
     data = request.get_json()
-    if not data or "name" not in data or "description" not in data or "preparation" not in data or "ingredients" not in data:
+    if (
+        not data
+        or "name" not in data
+        or "description" not in data
+        or "preparation" not in data
+        or "ingredients" not in data
+    ):
         return jsonify({"error": "Missing required parameters"}), 400
     # Unpacking data from JSON
     recipe_name = data.get("name")
@@ -91,6 +102,13 @@ def update_recipe(id):
     data = request.get_json()
     # Unpacking data from JSON
     recipe_name = data.get("name")
+    if recipe_name and recipe_name != recipe.name:
+        existing_recipe = Recipe.query.filter_by(name=recipe_name).first()
+        if existing_recipe:
+            return (
+                jsonify({"error": "Another recipe with the same name already exists"}),
+                400,
+            )
     recipe_description = data.get("description")
     recipe_preparation = data.get("preparation")
 
@@ -127,6 +145,7 @@ def update_recipe(id):
 
     return jsonify({"message": "Recipe updated successfully"})
 
+
 @app.route("/recipes/<int:id>", methods=["DELETE"])
 def delete_recipe(id):
     recipe = Recipe.query.get_or_404(id)
@@ -134,20 +153,57 @@ def delete_recipe(id):
     db.session.commit()
     return jsonify({"message": "Recipe deleted successfully"})
 
+
 @app.route("/recipes/search/")
 def search_recipe():
     query = request.args.get("name")
-    recipes = (Recipe.query.filter(Recipe.name.ilike(f"%{query}%")).all())
+    if query is None:
+        return jsonify([])
+    recipes = Recipe.query.filter(Recipe.name.ilike(f"%{query}%")).all()
     return_recipes = []
     for recipe in recipes:
         recipe_dict = convert_recipe_to_dict(recipe)
         return_recipes.append(recipe_dict)
     return jsonify(return_recipes)
 
-@app.route("/recipes/export")
+
+@app.route("/recipes/export", methods=["POST"])
 def export_recipes():
-    pass
-    
+    data = request.get_json()
+    recipe_name = data.get("recipe_name")
+    preparation_time = data.get("preparation_time")
+    ingredients_count = data.get("ingredients_count")
+    difficulty = data.get("difficulty")
+    export_format = data.get("export_format")
+
+    recipes = Recipe.query.all()
+    export_data = []
+    for recipe in recipes:
+        if (
+            (not recipe_name or recipe_name.lower() in recipe.name.lower())
+            and (not preparation_time or recipe.preparation_time <= preparation_time)
+            and (not ingredients_count or len(recipe.ingredients) <= ingredients_count)
+            and (not difficulty or recipe.difficulty.lower() == difficulty.lower())
+        ):
+            export_data.append(convert_recipe_to_dict(recipe))
+
+    if export_format == "csv":
+        # Construiește un șir de caractere CSV
+        csv_string = "id,name,description,preparation,ingredients\n"
+        for recipe in export_data:
+            ingredients = ", ".join(recipe["ingredients"])
+            csv_string += f"{recipe['id']},{recipe['name']},{recipe['description']},{recipe['preparation']},{ingredients}\n"
+
+        # Returnează răspunsul către client sub formă de fișier CSV
+        return Response(
+            csv_string,
+            mimetype="text/csv",
+            headers={"Content-disposition": "attachment; filename=recipes.csv"},
+        )
+
+    else:
+        return jsonify({"error": "Invalid export format"}), 400
+
 
 if __name__ == "__main__":
     app.run()
