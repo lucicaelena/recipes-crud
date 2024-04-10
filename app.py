@@ -188,13 +188,13 @@ def export_recipes():
             export_data.append(convert_recipe_to_dict(recipe))
 
     if export_format == "csv":
-        # Construiește un șir de caractere CSV
+        # Build a CSV string
         csv_string = "id,name,description,preparation,ingredients\n"
         for recipe in export_data:
             ingredients = ", ".join(recipe["ingredients"])
             csv_string += f"{recipe['id']},{recipe['name']},{recipe['description']},{recipe['preparation']},{ingredients}\n"
 
-        # Returnează răspunsul către client sub formă de fișier CSV
+        # Return the response to the client as a CSV file.
         return Response(
             csv_string,
             mimetype="text/csv",
